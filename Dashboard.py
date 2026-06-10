@@ -109,7 +109,7 @@ else:
     t_ord, d_ord, r_ord, rate_o = 0, 0, 0, 0
 
 # --- HIỂN THỊ CÁC THẺ SỐ LIỆU KPI ---
-st.markdown("### 📈 Chỉ số KPI hiệu suất")
+st.markdown("### 📈 Các chỉ số Đặt/Giao")
 r1 = st.columns(4)
 r1[0].metric("💰 Tổng Giá Trị Đặt", f"{total_val:,.2f} Trđ")
 r1[1].metric("✅ Đã Giao Hàng", f"{delivered_val:,.2f} Trđ")
