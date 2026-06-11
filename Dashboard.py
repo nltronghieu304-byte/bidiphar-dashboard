@@ -10,31 +10,6 @@ import streamlit as st
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="DMS Sales Dashboard - Bidiphar", layout="wide")
 
-# ── TIÊU ĐỀ + NÚT PDF ĐẦU TRANG ─────────────────────────────────────────────
-_c1, _c2 = st.columns([8, 2])
-with _c1:
-    st.markdown("# 📋 PHÂN TÍCH HIỆU SUẤT GIAO HÀNG DMS")
-with _c2:
-    st.markdown("<div style='padding-top:14px'>", unsafe_allow_html=True)
-    _pdf_ready = st.session_state.get("_pdf_ok", False)
-    if _pdf_ready:
-        import datetime as _dtt
-        st.download_button(
-            label="📥 Xuất báo cáo PDF",
-            data=st.session_state["_pdf_bytes"],
-            file_name=f"BaoCao_DMS_{_dtt.datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-            mime="application/pdf",
-            type="primary",
-            use_container_width=True,
-        )
-    elif st.session_state.get("_pdf_ok") is False:
-        st.error(st.session_state.get("_pdf_err",""))
-    else:
-        st.button("📥 Xuất báo cáo PDF", disabled=True, use_container_width=True,
-                  help="Đang tải dữ liệu...")
-    st.markdown("</div>", unsafe_allow_html=True)
-st.markdown("---")
-
 
 # -----------------------------------------------------------------------------
 # 1. ĐỌC FILE EXCEL MỚI NHẤT TRONG CÙNG THƯ MỤC (DÙNG KHI DEPLOY LÊN CLOUD)
@@ -386,17 +361,23 @@ else:
 
 
 
+
 # -----------------------------------------------------------------------------
-# 8. CHUẨN BỊ DATA PDF (lưu vào session_state để nút đầu trang dùng được)
+# 8. XUẤT BÁO CÁO PDF
 # -----------------------------------------------------------------------------
 
-def _find_arial():
-    """Tìm Arial trên Windows, fallback DejaVu trên Linux."""
+def _get_font():
+    """Tải font hỗ trợ tiếng Việt, cache vào session_state."""
+    import os, tempfile
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
-    import os
+
+    if "font_reg" in st.session_state:
+        return st.session_state["font_reg"], st.session_state["font_bold"]
+
+    # Thử font có sẵn trên hệ thống
     pairs = [
-        (r"C:\Windows\Fontsrial.ttf",   r"C:\Windows\Fontsrialbd.ttf"),
+        (r"C:\Windows\Fonts\arial.ttf",   r"C:\Windows\Fonts\arialbd.ttf"),
         (r"C:\Windows\Fonts\Arial.ttf",   r"C:\Windows\Fonts\ArialBD.ttf"),
         ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
          "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
@@ -404,43 +385,55 @@ def _find_arial():
          "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"),
         ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
          "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+        ("/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+         "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"),
     ]
+    fn, fb = "Helvetica", "Helvetica-Bold"
     for reg, bold in pairs:
+        reg = os.path.normpath(reg)
+        bold = os.path.normpath(bold)
         if os.path.exists(reg):
             try:
-                pdfmetrics.registerFont(TTFont("_VF",  reg))
-                pdfmetrics.registerFont(TTFont("_VFB", bold if os.path.exists(bold) else reg))
-                return "_VF", "_VFB"
+                pdfmetrics.registerFont(TTFont("VF",  reg))
+                fn = "VF"
             except Exception:
                 continue
-    return "Helvetica", "Helvetica-Bold"
+            if os.path.exists(bold):
+                try:
+                    pdfmetrics.registerFont(TTFont("VFB", bold))
+                    fb = "VFB"
+                except Exception:
+                    fb = fn
+            else:
+                fb = fn
+            break
+
+    st.session_state["font_reg"]  = fn
+    st.session_state["font_bold"] = fb
+    return fn, fb
 
 
-def build_pdf_bytes(file_name, total_val, delivered_val, remain_val, rate_v,
-                    t_ord, d_ord, r_ord, rate_o,
-                    df_res, df_asm, df_p, df_detail, to_million):
+def _build_pdf(file_name, total_val, delivered_val, remain_val, rate_v,
+               t_ord, d_ord, r_ord, rate_o,
+               df_res, df_asm, df_p, df_detail):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph,
+                                    Spacer, Table, TableStyle)
     from reportlab.lib.styles import ParagraphStyle
     from io import BytesIO
     import datetime
 
-    fn, fb = _find_arial()
+    fn, fb = _get_font()
 
-    buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-                            rightMargin=1.5*cm, leftMargin=1.5*cm,
-                            topMargin=1.5*cm, bottomMargin=1.5*cm)
-
-    def ps(name, size, bold=False, color="#000000", sb=0, sa=2):
-        return ParagraphStyle(name, fontSize=size,
+    def ps(sz, bold=False, color="#000000", sb=0, sa=2):
+        return ParagraphStyle("x", fontSize=sz,
                                fontName=fb if bold else fn,
                                textColor=colors.HexColor(color),
                                spaceBefore=sb, spaceAfter=sa)
 
-    def tbl(data, widths, hc):
+    def mktbl(data, widths, hc):
         t = Table(data, colWidths=widths, repeatRows=1)
         t.setStyle(TableStyle([
             ("BACKGROUND",    (0,0),(-1,0),  colors.HexColor(hc)),
@@ -448,79 +441,78 @@ def build_pdf_bytes(file_name, total_val, delivered_val, remain_val, rate_v,
             ("FONTNAME",      (0,0),(-1,0),  fb),
             ("FONTNAME",      (0,1),(-1,-1), fn),
             ("FONTSIZE",      (0,0),(-1,-1), 8),
-            ("ROWBACKGROUNDS",(0,1),(-1,-1), [colors.HexColor("#fdf5f5"),colors.white]),
+            ("ROWBACKGROUNDS",(0,1),(-1,-1),
+             [colors.HexColor("#fdf5f5"), colors.white]),
             ("GRID",          (0,0),(-1,-1), 0.4, colors.HexColor("#cccccc")),
             ("LEFTPADDING",   (0,0),(-1,-1), 5),
             ("RIGHTPADDING",  (0,0),(-1,-1), 5),
             ("TOPPADDING",    (0,0),(-1,-1), 3),
             ("BOTTOMPADDING", (0,0),(-1,-1), 3),
-            ("WORDWRAP",      (0,0),(-1,-1), True),
         ]))
         return t
 
-    now  = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            rightMargin=1.5*cm, leftMargin=1.5*cm,
+                            topMargin=1.5*cm, bottomMargin=1.5*cm)
+    now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
     story = [
         Paragraph("BAO CAO HIEU SUAT GIAO HANG DMS - BIDIPHAR",
-                  ps("ti", 14, bold=True, color="#c0392b", sa=4)),
-        Paragraph(f"File: {file_name}  |  Xuat luc: {now}",
-                  ps("bo", 8, sa=2)),
-        Spacer(1, 0.3*cm),
+                  ps(14, bold=True, color="#c0392b", sa=4)),
+        Paragraph(f"File: {file_name}  |  Xuat luc: {now}", ps(8, sa=4)),
+        Spacer(1, 0.2*cm),
     ]
 
-    def sec(title): story.append(Paragraph(title, ps("su",10,bold=True,color="#2c3e50",sb=10,sa=3)))
+    def h(txt):
+        story.append(Paragraph(txt, ps(10, bold=True, color="#2c3e50", sb=8, sa=3)))
 
-    # KPI
-    sec("CHI SO KPI")
-    story.append(tbl([
-        ["Chi so","Gia tri"],
-        ["Tong Gia Tri Dat",      f"{total_val:,.2f} Tr.dong"],
-        ["Da Giao Hang",          f"{delivered_val:,.2f} Tr.dong"],
-        ["Chua Giao (Con lai)",   f"{remain_val:,.2f} Tr.dong"],
-        ["Ty le Chua Giao (DT)",  f"{rate_v:.1f}%"],
-        ["Tong Don Dat (SQ/SO)",  f"{t_ord:,} Don"],
-        ["So Don Da Xuat",        f"{d_ord:,} Don"],
-        ["So Don Chua Xuat",      f"{r_ord:,} Don"],
-        ["Ty le Chua Xuat (Don)", f"{rate_o:.1f}%"],
+    h("CHI SO KPI")
+    story.append(mktbl([
+        ["Chi so",                  "Gia tri"],
+        ["Tong Gia Tri Dat",        f"{total_val:,.2f} Tr.dong"],
+        ["Da Giao Hang",            f"{delivered_val:,.2f} Tr.dong"],
+        ["Chua Giao (Con lai)",     f"{remain_val:,.2f} Tr.dong"],
+        ["Ty le Chua Giao (DT)",    f"{rate_v:.1f}%"],
+        ["Tong Don Dat (SQ/SO)",    f"{t_ord:,} Don"],
+        ["So Don Da Xuat",          f"{d_ord:,} Don"],
+        ["So Don Chua Xuat",        f"{r_ord:,} Don"],
+        ["Ty le Chua Xuat (Don)",   f"{rate_o:.1f}%"],
     ], [10*cm, 6*cm], "#c0392b"))
 
-    # Nguyen nhan
     if not df_res.empty:
-        sec("NGUYEN NHAN CHUA XUAT")
-        rows = [["Ly Do","Gia tri (Tr.dong)","So don"]]
+        h("NGUYEN NHAN CHUA XUAT")
+        rows = [["Ly Do", "Gia tri (Tr.dong)", "So don"]]
         for _, r in df_res.sort_values("Trd", ascending=False).iterrows():
             rows.append([str(r["Ly Do"]), f"{r['Trd']:,.2f}", str(int(r["So don"]))])
-        story.append(tbl(rows, [10*cm,4*cm,3*cm], "#e67e22"))
+        story.append(mktbl(rows, [10*cm, 4*cm, 3*cm], "#e67e22"))
 
-    # Top ASM
     if not df_asm.empty:
-        sec("TOP 10 ASM CO DOANH SO CHUA XUAT CAO NHAT")
-        rows = [["Ten ASM","Chua xuat (Tr.dong)"]]
+        h("TOP 10 ASM CO DOANH SO CHUA XUAT CAO NHAT")
+        rows = [["Ten ASM", "Chua xuat (Tr.dong)"]]
         for _, r in df_asm.iterrows():
             rows.append([str(r["Ten ASM"]), f"{r['Trd']:,.2f}"])
-        story.append(tbl(rows, [12*cm,5*cm], "#c0392b"))
+        story.append(mktbl(rows, [12*cm, 5*cm], "#c0392b"))
 
-    # Top SP
     if not df_p.empty:
-        sec("TOP 10 SAN PHAM CO DOANH SO CHUA XUAT CAO NHAT")
-        rows = [["Ten San Pham","Chua xuat (Tr.dong)"]]
+        h("TOP 10 SAN PHAM CO DOANH SO CHUA XUAT CAO NHAT")
+        rows = [["Ten San Pham", "Chua xuat (Tr.dong)"]]
         for _, r in df_p.iterrows():
             rows.append([str(r["Ten SP"]), f"{r['Trd']:,.2f}"])
-        story.append(tbl(rows, [12*cm,5*cm], "#e67e22"))
+        story.append(mktbl(rows, [12*cm, 5*cm], "#e67e22"))
 
-    # Bang chi tiet
     if not df_detail.empty:
-        sec("BANG CHI TIET: TOP 5 ASM x TOP 3 SAN PHAM CHUA XUAT")
-        rows = [["Quan ly (ASM)","San Pham Chua Xuat","Gia Tri Chua Xuat"]]
+        h("BANG CHI TIET: TOP 5 ASM x TOP 3 SAN PHAM CHUA XUAT")
+        rows = [["Quan ly (ASM)", "San Pham Chua Xuat", "Gia Tri Chua Xuat"]]
         for _, r in df_detail.iterrows():
             rows.append([str(r.iloc[0]), str(r.iloc[1]), str(r.iloc[2])])
-        story.append(tbl(rows, [5.5*cm,7.5*cm,4*cm], "#2c3e50"))
+        story.append(mktbl(rows, [5.5*cm, 7.5*cm, 4*cm], "#2c3e50"))
 
     doc.build(story)
     buf.seek(0)
     return buf.read()
 
 
-# Tính data & build PDF, lưu vào session_state
+# Chuẩn bị data PDF
 import datetime as _dt
 
 _df_res_pdf = pd.DataFrame()
@@ -535,28 +527,48 @@ if "Lý Do" in df_f.columns and "Giá Trị Còn Lại" in df_f.columns:
 
 _df_asm_pdf = pd.DataFrame()
 if "Tên ASM" in df_f.columns and "Giá Trị Còn Lại" in df_f.columns:
-    _df_asm_pdf = (df_f.groupby("Tên ASM")["Giá Trị Còn Lại"].sum()
-                   .reset_index().rename(columns={"Tên ASM":"Ten ASM","Giá Trị Còn Lại":"_v"}))
-    _df_asm_pdf["Trd"] = _df_asm_pdf["_v"] / to_million
+    _df_asm_pdf = df_f.groupby("Tên ASM")["Giá Trị Còn Lại"].sum().reset_index()
+    _df_asm_pdf["Trd"]     = _df_asm_pdf["Giá Trị Còn Lại"] / to_million
+    _df_asm_pdf["Ten ASM"] = _df_asm_pdf["Tên ASM"]
     _df_asm_pdf = _df_asm_pdf.sort_values("Trd", ascending=False).head(10)
 
 _df_p_pdf = pd.DataFrame()
 if "Tên Sản Phẩm" in df_f.columns and "Giá Trị Còn Lại" in df_f.columns:
-    _df_p_pdf = (df_f.groupby("Tên Sản Phẩm")["Giá Trị Còn Lại"].sum()
-                 .reset_index().rename(columns={"Tên Sản Phẩm":"Ten SP","Giá Trị Còn Lại":"_v"}))
-    _df_p_pdf["Trd"] = _df_p_pdf["_v"] / to_million
+    _df_p_pdf = df_f.groupby("Tên Sản Phẩm")["Giá Trị Còn Lại"].sum().reset_index()
+    _df_p_pdf["Trd"]    = _df_p_pdf["Giá Trị Còn Lại"] / to_million
+    _df_p_pdf["Ten SP"] = _df_p_pdf["Tên Sản Phẩm"]
     _df_p_pdf = _df_p_pdf.sort_values("Trd", ascending=False).head(10)
 
 _df_detail_pdf = df_show if "df_show" in dir() else pd.DataFrame()
 
+# Build PDF bytes
 try:
-    st.session_state["_pdf_bytes"] = build_pdf_bytes(
+    _pdf_bytes = _build_pdf(
         file_name, total_val, delivered_val, remain_val, rate_v,
         t_ord, d_ord, r_ord, rate_o,
-        _df_res_pdf, _df_asm_pdf, _df_p_pdf, _df_detail_pdf, to_million
+        _df_res_pdf, _df_asm_pdf, _df_p_pdf, _df_detail_pdf
     )
-    st.session_state["_pdf_ok"]  = True
-    st.session_state["_pdf_err"] = ""
+    _pdf_ok = True
 except Exception as _e:
-    st.session_state["_pdf_ok"]  = False
-    st.session_state["_pdf_err"] = str(_e)
+    _pdf_ok  = False
+    _pdf_err = str(_e)
+
+# ── TIÊU ĐỀ + NÚT PDF — render đầu trang ────────────────────────────────────
+_ct, _cb = st.columns([8, 2])
+with _ct:
+    st.markdown("# 📋 PHÂN TÍCH HIỆU SUẤT GIAO HÀNG DMS")
+with _cb:
+    st.markdown("<div style='padding-top:14px'>", unsafe_allow_html=True)
+    if _pdf_ok:
+        st.download_button(
+            label="📥 Xuất báo cáo PDF",
+            data=_pdf_bytes,
+            file_name=f"BaoCao_DMS_{_dt.datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+            mime="application/pdf",
+            type="primary",
+            use_container_width=True,
+        )
+    else:
+        st.error(f"Loi PDF: {_pdf_err}")
+    st.markdown("</div>", unsafe_allow_html=True)
+st.markdown("---")
