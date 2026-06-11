@@ -9,7 +9,15 @@ import streamlit as st
 # CONFIG TRANG DASHBOARD
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="DMS Sales Dashboard - Bidiphar", layout="wide")
-st.title("📋 PHÂN TÍCH HIỆU SUẤT GIAO HÀNG DMS")
+
+# Tiêu đề + nút PDF cùng hàng, nút bên phải
+hdr_left, hdr_right = st.columns([8, 2])
+with hdr_left:
+    st.markdown("# 📋 PHÂN TÍCH HIỆU SUẤT GIAO HÀNG DMS")
+with hdr_right:
+    st.markdown("<div style='padding-top:18px'>", unsafe_allow_html=True)
+    pdf_clicked = st.button("📥 Xuất báo cáo PDF", type="primary", use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
@@ -357,3 +365,186 @@ if 'Tên ASM' in df_f.columns and 'Tên Sản Phẩm' in df_f.columns and 'Giá 
     st.dataframe(df_show, use_container_width=True, hide_index=True)
 else:
     st.warning("Không thể hiển thị bảng chi tiết do thiếu cột dữ liệu cần thiết.")
+
+# -----------------------------------------------------------------------------
+# 8. XUẤT BÁO CÁO PDF
+# -----------------------------------------------------------------------------
+st.markdown("---")
+st.subheader("📥 Xuất báo cáo PDF")
+
+def build_pdf(file_name, total_val, delivered_val, remain_val, rate_v,
+              t_ord, d_ord, r_ord, rate_o, df_res, df_asm, df_p, df_detail):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from io import BytesIO
+    import datetime
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            rightMargin=1.5*cm, leftMargin=1.5*cm,
+                            topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    s_title = ParagraphStyle('t', fontSize=14, fontName='Helvetica-Bold',
+                              textColor=colors.HexColor('#c0392b'), spaceAfter=4)
+    s_sub   = ParagraphStyle('s', fontSize=10, fontName='Helvetica-Bold',
+                              textColor=colors.HexColor('#2c3e50'), spaceBefore=10, spaceAfter=3)
+    s_body  = ParagraphStyle('b', fontSize=8, fontName='Helvetica', spaceAfter=2)
+
+    now = datetime.datetime.now().strftime('%d/%m/%Y %H:%M')
+    story = []
+    story.append(Paragraph("BAO CAO HIEU SUAT GIAO HANG DMS - BIDIPHAR", s_title))
+    story.append(Paragraph(f"File: {file_name}   |   Xuat luc: {now}", s_body))
+    story.append(Spacer(1, 0.2*cm))
+
+    # KPI
+    story.append(Paragraph("CHI SO KPI", s_sub))
+    kd = [["Chi so", "Gia tri"],
+          ["Tong Gia Tri Dat", f"{total_val:,.2f} Trieu"],
+          ["Da Giao Hang", f"{delivered_val:,.2f} Trieu"],
+          ["Chua Giao (Con lai)", f"{remain_val:,.2f} Trieu"],
+          ["Ty le Chua Giao (DT)", f"{rate_v:.1f}%"],
+          ["Tong Don Dat", f"{t_ord:,} Don"],
+          ["So Don Da Xuat", f"{d_ord:,} Don"],
+          ["So Don Chua Xuat", f"{r_ord:,} Don"],
+          ["Ty le Chua Xuat (Don)", f"{rate_o:.1f}%"]]
+    tk = Table(kd, colWidths=[10*cm, 6*cm])
+    tk.setStyle(TableStyle([
+        ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#c0392b')),
+        ('TEXTCOLOR',(0,0),(-1,0),colors.white),
+        ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+        ('FONTSIZE',(0,0),(-1,-1),8),
+        ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.HexColor('#fdf5f5'),colors.white]),
+        ('GRID',(0,0),(-1,-1),0.4,colors.HexColor('#cccccc')),
+        ('LEFTPADDING',(0,0),(-1,-1),5),('RIGHTPADDING',(0,0),(-1,-1),5),
+        ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),
+    ]))
+    story.append(tk)
+
+    # Nguyên nhân
+    if not df_res.empty:
+        story.append(Paragraph("NGUYEN NHAN CHUA XUAT", s_sub))
+        rd = [["Ly Do", "Gia tri (Trieu)", "So don"]]
+        for _, r in df_res.sort_values('Trd', ascending=False).iterrows():
+            rd.append([str(r['Ly Do'])[:55], f"{r['Trd']:,.2f}", str(int(r['So don']))])
+        tr = Table(rd, colWidths=[10*cm, 4*cm, 3*cm])
+        tr.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#e67e22')),
+            ('TEXTCOLOR',(0,0),(-1,0),colors.white),
+            ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+            ('FONTSIZE',(0,0),(-1,-1),8),
+            ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.HexColor('#fff8f0'),colors.white]),
+            ('GRID',(0,0),(-1,-1),0.4,colors.HexColor('#cccccc')),
+            ('LEFTPADDING',(0,0),(-1,-1),5),('RIGHTPADDING',(0,0),(-1,-1),5),
+            ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),
+        ]))
+        story.append(tr)
+
+    # Top ASM
+    if not df_asm.empty:
+        story.append(Paragraph("TOP 10 ASM CO DOANH SO CHUA XUAT CAO NHAT", s_sub))
+        ad = [["Ten ASM", "Chua xuat (Trieu)"]]
+        for _, r in df_asm.iterrows():
+            ad.append([str(r['Ten ASM'])[:50], f"{r['Trd']:,.2f}"])
+        ta = Table(ad, colWidths=[12*cm, 5*cm])
+        ta.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#c0392b')),
+            ('TEXTCOLOR',(0,0),(-1,0),colors.white),
+            ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+            ('FONTSIZE',(0,0),(-1,-1),8),
+            ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.HexColor('#fdf5f5'),colors.white]),
+            ('GRID',(0,0),(-1,-1),0.4,colors.HexColor('#cccccc')),
+            ('LEFTPADDING',(0,0),(-1,-1),5),('RIGHTPADDING',(0,0),(-1,-1),5),
+            ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),
+        ]))
+        story.append(ta)
+
+    # Top SP
+    if not df_p.empty:
+        story.append(Paragraph("TOP 10 SAN PHAM CO DOANH SO CHUA XUAT CAO NHAT", s_sub))
+        pd2 = [["Ten San Pham", "Chua xuat (Trieu)"]]
+        for _, r in df_p.iterrows():
+            pd2.append([str(r['Ten SP'])[:55], f"{r['Trd']:,.2f}"])
+        tp = Table(pd2, colWidths=[12*cm, 5*cm])
+        tp.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#e67e22')),
+            ('TEXTCOLOR',(0,0),(-1,0),colors.white),
+            ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+            ('FONTSIZE',(0,0),(-1,-1),8),
+            ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.HexColor('#fff8f0'),colors.white]),
+            ('GRID',(0,0),(-1,-1),0.4,colors.HexColor('#cccccc')),
+            ('LEFTPADDING',(0,0),(-1,-1),5),('RIGHTPADDING',(0,0),(-1,-1),5),
+            ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),
+        ]))
+        story.append(tp)
+
+    # Bảng chi tiết
+    if not df_detail.empty:
+        story.append(Paragraph("BANG CHI TIET: TOP 5 ASM x TOP 3 SAN PHAM", s_sub))
+        dd = [["Quan ly (ASM)", "San Pham Chua Xuat", "Gia Tri Chua Xuat"]]
+        for _, r in df_detail.iterrows():
+            dd.append([str(r.iloc[0])[:30], str(r.iloc[1])[:35], str(r.iloc[2])])
+        td = Table(dd, colWidths=[5.5*cm, 7.5*cm, 4*cm])
+        td.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#2c3e50')),
+            ('TEXTCOLOR',(0,0),(-1,0),colors.white),
+            ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+            ('FONTSIZE',(0,0),(-1,-1),8),
+            ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.HexColor('#f0f4f8'),colors.white]),
+            ('GRID',(0,0),(-1,-1),0.4,colors.HexColor('#cccccc')),
+            ('LEFTPADDING',(0,0),(-1,-1),5),('RIGHTPADDING',(0,0),(-1,-1),5),
+            ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),
+        ]))
+        story.append(td)
+
+    doc.build(story)
+    buf.seek(0)
+    return buf
+
+# Chuẩn bị dữ liệu cho PDF
+df_res_pdf = pd.DataFrame()
+if 'Giá Trị Còn Lại' in df_f.columns and 'Lý Do' in df_f.columns:
+    df_res_pdf = df_f.groupby('Lý Do')['Giá Trị Còn Lại'].sum().reset_index()
+    df_res_pdf['Trd'] = df_res_pdf['Giá Trị Còn Lại'] / to_million
+    df_res_pdf['Ly Do'] = df_res_pdf['Lý Do']
+    df_don_pdf = df_f[df_f['Giá Trị Còn Lại'] > 0.01].groupby('Lý Do').size().reset_index(name='So don')
+    df_res_pdf = df_res_pdf.merge(df_don_pdf, on='Lý Do', how='left')
+    df_res_pdf['So don'] = df_res_pdf['So don'].fillna(0).astype(int)
+
+df_asm_pdf = pd.DataFrame()
+if 'Tên ASM' in df_f.columns and 'Giá Trị Còn Lại' in df_f.columns:
+    df_asm_pdf = df_f.groupby('Tên ASM')['Giá Trị Còn Lại'].sum().reset_index()
+    df_asm_pdf['Trd'] = df_asm_pdf['Giá Trị Còn Lại'] / to_million
+    df_asm_pdf['Ten ASM'] = df_asm_pdf['Tên ASM']
+    df_asm_pdf = df_asm_pdf.sort_values('Trd', ascending=False).head(10)
+
+df_p_pdf = pd.DataFrame()
+if 'Tên Sản Phẩm' in df_f.columns and 'Giá Trị Còn Lại' in df_f.columns:
+    df_p_pdf = df_f.groupby('Tên Sản Phẩm')['Giá Trị Còn Lại'].sum().reset_index()
+    df_p_pdf['Trd'] = df_p_pdf['Giá Trị Còn Lại'] / to_million
+    df_p_pdf['Ten SP'] = df_p_pdf['Tên Sản Phẩm']
+    df_p_pdf = df_p_pdf.sort_values('Trd', ascending=False).head(10)
+
+df_detail_pdf = df_show if 'df_show' in dir() else pd.DataFrame()
+
+if pdf_clicked:
+    with st.spinner("Dang tao file PDF..."):
+        try:
+            pdf_buf = build_pdf(
+                file_name, total_val, delivered_val, remain_val, rate_v,
+                t_ord, d_ord, r_ord, rate_o,
+                df_res_pdf, df_asm_pdf, df_p_pdf, df_detail_pdf
+            )
+            import datetime
+            fname = f"BaoCao_DMS_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+            st.download_button(
+                label="⬇️ Nhan day de tai file PDF",
+                data=pdf_buf,
+                file_name=fname,
+                mime="application/pdf",
+                type="primary"
+            )
+        except Exception as e:
+            st.error(f"Loi tao PDF: {e}. Vui long cai: pip install reportlab")
