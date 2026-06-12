@@ -31,40 +31,61 @@ def _build_pdf(file_name, total_val, delivered_val, remain_val, rate_v,
         return str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 
     fn, fb = "Helvetica", "Helvetica-Bold"
-    checked = set()
-    pairs = [
-        (os.path.normpath("C:/Windows/Fonts/arial.ttf"),
-         os.path.normpath("C:/Windows/Fonts/arialbd.ttf")),
-        (os.path.normpath("C:/Windows/Fonts/Arial.ttf"),
-         os.path.normpath("C:/Windows/Fonts/ArialBD.ttf")),
-        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
-        ("/usr/share/fonts/dejavu/DejaVuSans.ttf",
-         "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"),
-        ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
-        ("/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-         "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"),
-    ]
-    for reg, bold in pairs:
-        if reg in checked:
-            continue
-        checked.add(reg)
-        if os.path.exists(reg):
+
+    # Download NotoSans hỗ trợ tiếng Việt đầy đủ nếu chưa có
+    import tempfile, urllib.request
+    _cache = os.path.join(tempfile.gettempdir(), "NotoSans_viet")
+    _reg_path  = os.path.join(_cache, "NotoSans-Regular.ttf")
+    _bold_path = os.path.join(_cache, "NotoSans-Bold.ttf")
+    os.makedirs(_cache, exist_ok=True)
+
+    _noto_reg  = "https://github.com/notofonts/notofonts.github.io/raw/main/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf"
+    _noto_bold = "https://github.com/notofonts/notofonts.github.io/raw/main/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf"
+
+    def _dl(url, dest):
+        if not os.path.exists(dest):
             try:
-                pdfmetrics.registerFont(TTFont("_VF", reg))
-                fn = "_VF"
-                if os.path.exists(bold):
-                    try:
-                        pdfmetrics.registerFont(TTFont("_VFB", bold))
-                        fb = "_VFB"
-                    except Exception:
-                        fb = "_VF"
-                else:
-                    fb = "_VF"
-                break
+                urllib.request.urlretrieve(url, dest)
             except Exception:
-                continue
+                return False
+        return os.path.exists(dest)
+
+    if _dl(_noto_reg, _reg_path):
+        try:
+            pdfmetrics.registerFont(TTFont("NotoSans",     _reg_path))
+            fn = "NotoSans"
+        except Exception:
+            pass
+    if _dl(_noto_bold, _bold_path):
+        try:
+            pdfmetrics.registerFont(TTFont("NotoSans-Bold", _bold_path))
+            fb = "NotoSans-Bold"
+        except Exception:
+            fb = fn
+
+    # Fallback: thử font hệ thống nếu download thất bại
+    if fn == "Helvetica":
+        _sys_pairs = [
+            (os.path.normpath("C:/Windows/Fonts/arial.ttf"),
+             os.path.normpath("C:/Windows/Fonts/arialbd.ttf")),
+            ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+            ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+        ]
+        for _r, _b in _sys_pairs:
+            if os.path.exists(_r):
+                try:
+                    pdfmetrics.registerFont(TTFont("_VF", _r))
+                    fn = "_VF"
+                    if os.path.exists(_b):
+                        pdfmetrics.registerFont(TTFont("_VFB", _b))
+                        fb = "_VFB"
+                    else:
+                        fb = "_VF"
+                    break
+                except Exception:
+                    continue
 
     def ps(sz, bold=False, color="#000000", sb=0, sa=2):
         return ParagraphStyle("_", fontSize=sz,
