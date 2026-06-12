@@ -126,7 +126,7 @@ def _build_pdf(file_name, total_val, delivered_val, remain_val, rate_v,
 
     h("CHỈ SỐ ĐẶT GIAO")
     story.append(mktbl([
-        ["Chỉ số",               "Giá trị"],
+        ["CHỈ SỐ ĐẶT GIAO",               "Giá trị"],
         ["Tổng Giá Trị Đặt",      f"{total_val:,.2f} Tr.đồng"],
         ["Đã Giao Hàng",          f"{delivered_val:,.2f} Tr.đồng"],
         ["Chưa Giao (Còn lại)",   f"{remain_val:,.2f} Tr.đồng"],
