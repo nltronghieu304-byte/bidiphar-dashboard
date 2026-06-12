@@ -16,7 +16,7 @@ st.set_page_config(page_title="DMS Sales Dashboard - Bidiphar", layout="wide")
 def _build_pdf(file_name, total_val, delivered_val, remain_val, rate_v,
                t_ord, d_ord, r_ord, rate_o,
                df_res, df_asm, df_p, df_detail):
-    import os, datetime
+    import os, datetime, unicodedata
     from io import BytesIO
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -26,32 +26,45 @@ def _build_pdf(file_name, total_val, delivered_val, remain_val, rate_v,
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
+    # Hàm escape XML cho Paragraph (tránh lỗi parse)
+    def xesc(s):
+        return str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+
     fn, fb = "Helvetica", "Helvetica-Bold"
+    checked = set()
     pairs = [
-        (os.path.normpath(r"C:\Windows\Fonts\arial.ttf"),
-         os.path.normpath(r"C:\Windows\Fonts\arialbd.ttf")),
-        (os.path.normpath(r"C:\Windows\Fonts\Arial.ttf"),
-         os.path.normpath(r"C:\Windows\Fonts\ArialBD.ttf")),
+        (os.path.normpath("C:/Windows/Fonts/arial.ttf"),
+         os.path.normpath("C:/Windows/Fonts/arialbd.ttf")),
+        (os.path.normpath("C:/Windows/Fonts/Arial.ttf"),
+         os.path.normpath("C:/Windows/Fonts/ArialBD.ttf")),
         ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
          "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
         ("/usr/share/fonts/dejavu/DejaVuSans.ttf",
          "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"),
         ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
          "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+        ("/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+         "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"),
     ]
     for reg, bold in pairs:
+        if reg in checked:
+            continue
+        checked.add(reg)
         if os.path.exists(reg):
             try:
-                pdfmetrics.registerFont(TTFont("_VF",  reg))
+                pdfmetrics.registerFont(TTFont("_VF", reg))
                 fn = "_VF"
                 if os.path.exists(bold):
-                    pdfmetrics.registerFont(TTFont("_VFB", bold))
-                    fb = "_VFB"
+                    try:
+                        pdfmetrics.registerFont(TTFont("_VFB", bold))
+                        fb = "_VFB"
+                    except Exception:
+                        fb = "_VF"
                 else:
                     fb = "_VF"
+                break
             except Exception:
-                fn, fb = "Helvetica", "Helvetica-Bold"
-            break
+                continue
 
     def ps(sz, bold=False, color="#000000", sb=0, sa=2):
         return ParagraphStyle("_", fontSize=sz,
@@ -83,50 +96,50 @@ def _build_pdf(file_name, total_val, delivered_val, remain_val, rate_v,
                             topMargin=1.5*cm, bottomMargin=1.5*cm)
     now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
     story = [
-        Paragraph("BAO CAO HIEU SUAT GIAO HANG DMS - BIDIPHAR",
+        Paragraph("BÁO CÁO HIỆU SUẤT GIAO HÀNG DMS - BIDIPHAR",
                   ps(14, bold=True, color="#c0392b", sa=4)),
-        Paragraph(f"File: {file_name}  |  Xuat luc: {now}", ps(8, sa=4)),
+        Paragraph(f"File: {file_name}  |  Xuất lúc: {now}", ps(8, sa=4)),
         Spacer(1, 0.2*cm),
     ]
     def h(t): story.append(Paragraph(t, ps(10, bold=True, color="#2c3e50", sb=8, sa=3)))
 
-    h("CHI SO KPI")
+    h("CHỈ SỐ KPI")
     story.append(mktbl([
-        ["Chi so",                "Gia tri"],
-        ["Tong Gia Tri Dat",      f"{total_val:,.2f} Tr.dong"],
-        ["Da Giao Hang",          f"{delivered_val:,.2f} Tr.dong"],
-        ["Chua Giao (Con lai)",   f"{remain_val:,.2f} Tr.dong"],
-        ["Ty le Chua Giao (DT)",  f"{rate_v:.1f}%"],
-        ["Tong Don Dat (SQ/SO)",  f"{t_ord:,} Don"],
-        ["So Don Da Xuat",        f"{d_ord:,} Don"],
-        ["So Don Chua Xuat",      f"{r_ord:,} Don"],
-        ["Ty le Chua Xuat (Don)", f"{rate_o:.1f}%"],
+        ["Chỉ số",               "Giá trị"],
+        ["Tổng Giá Trị Đặt",      f"{total_val:,.2f} Tr.đồng"],
+        ["Đã Giao Hàng",          f"{delivered_val:,.2f} Tr.đồng"],
+        ["Chưa Giao (Còn lại)",   f"{remain_val:,.2f} Tr.đồng"],
+        ["Tỷ lệ Chưa Giao (DT)",  f"{rate_v:.1f}%"],
+        ["Tổng Đơn Đặt (SQ/SO)",  f"{t_ord:,} Đơn"],
+        ["Số Đơn Đã Xuất",        f"{d_ord:,} Đơn"],
+        ["Số Đơn Chưa Xuất",      f"{r_ord:,} Đơn"],
+        ["Tỷ lệ Chưa Xuất (Đơn)", f"{rate_o:.1f}%"],
     ], [10*cm, 6*cm], "#c0392b"))
 
     if not df_res.empty:
-        h("NGUYEN NHAN CHUA XUAT")
-        rows = [["Ly Do","Gia tri (Tr.dong)","So don"]]
+        h("NGUYÊN NHÂN CHƯA XUẤT")
+        rows = [["Lý Do","Giá trị (Tr.đồng)","Số đơn"]]
         for _, r in df_res.sort_values("Trd",ascending=False).iterrows():
             rows.append([str(r["Ly Do"]),f"{r['Trd']:,.2f}",str(int(r["So don"]))])
         story.append(mktbl(rows,[10*cm,4*cm,3*cm],"#e67e22"))
 
     if not df_asm.empty:
-        h("TOP 10 ASM CO DOANH SO CHUA XUAT CAO NHAT")
-        rows = [["Ten ASM","Chua xuat (Tr.dong)"]]
+        h("TOP 10 ASM CÓ DOANH SỐ CHƯA XUẤT CAO NHẤT")
+        rows = [["Tên ASM","Chưa xuất (Tr.đồng)"]]
         for _, r in df_asm.iterrows():
             rows.append([str(r["Ten ASM"]),f"{r['Trd']:,.2f}"])
         story.append(mktbl(rows,[12*cm,5*cm],"#c0392b"))
 
     if not df_p.empty:
-        h("TOP 10 SAN PHAM CO DOANH SO CHUA XUAT CAO NHAT")
-        rows = [["Ten San Pham","Chua xuat (Tr.dong)"]]
+        h("TOP 10 SẢN PHẨM CÓ DOANH SỐ CHƯA XUẤT CAO NHẤT")
+        rows = [["Tên Sản Phẩm","Chưa xuất (Tr.đồng)"]]
         for _, r in df_p.iterrows():
             rows.append([str(r["Ten SP"]),f"{r['Trd']:,.2f}"])
         story.append(mktbl(rows,[12*cm,5*cm],"#e67e22"))
 
     if not df_detail.empty:
-        h("BANG CHI TIET: TOP 5 ASM x TOP 3 SAN PHAM CHUA XUAT")
-        rows = [["Quan ly (ASM)","San Pham Chua Xuat","Gia Tri Chua Xuat"]]
+        h("BẢNG CHI TIẾT: TOP 5 ASM × TOP 3 SẢN PHẨM CHƯA XUẤT")
+        rows = [["Quản lý (ASM)","Sản Phẩm Chưa Xuất","Giá Trị Chưa Xuất"]]
         for _, r in df_detail.iterrows():
             rows.append([str(r.iloc[0]),str(r.iloc[1]),str(r.iloc[2])])
         story.append(mktbl(rows,[5.5*cm,7.5*cm,4*cm],"#2c3e50"))
