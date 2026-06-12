@@ -369,7 +369,7 @@ if order_col in df_f.columns and 'Giá Trị Còn Lại' in df_f.columns:
 else:
     t_ord, d_ord, r_ord, rate_o = 0, 0, 0, 0
 
-st.markdown("### 📊 Chỉ số KPI hiệu suất")
+st.markdown("### 📊 CHỈ SỐ ĐẶT-GIAO")
 r1 = st.columns(4)
 r1[0].metric("📊 Tổng Giá Trị Đặt", f"{total_val:,.2f} Trđ")
 r1[1].metric("📦 Đã Giao Hàng", f"{delivered_val:,.2f} Trđ")
