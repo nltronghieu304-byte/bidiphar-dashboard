@@ -15,7 +15,7 @@ st.set_page_config(page_title="DMS Sales Dashboard - Bidiphar", layout="wide")
 # =============================================================================
 def _build_pdf(file_name, total_val, delivered_val, remain_val, rate_v,
                t_ord, d_ord, r_ord, rate_o,
-               df_res, df_asm, df_p, df_detail):
+               df_res, df_asm, df_p, df_detail): # <-- Giữ nguyên 12 tham số gốc ổn định
     import os, datetime, unicodedata
     from io import BytesIO
     from reportlab.lib.pagesizes import A4
@@ -144,6 +144,41 @@ def _build_pdf(file_name, total_val, delivered_val, remain_val, rate_v,
             rows.append([str(r["Ly Do"]),f"{r['Trd']:,.2f}",str(int(r["So don"]))])
         story.append(mktbl(rows,[10*cm,4*cm,3*cm],"#e67e22"))
 
+    # =========================================================================
+    # BỔ SUNG: TỰ ĐỘNG TÍNH TOÁN VÀ ĐỔ DỮ LIỆU CHI NHÁNH VÀO PDF TẠI ĐÂY
+    # =========================================================================
+    try:
+        # Lấy biến df_f toàn cục của chương trình đang chạy để xử lý dữ liệu hiện tại
+        import __main__
+        df_global = getattr(__main__, 'df_f', None)
+        
+        if df_global is not None and 'Lý Do' in df_global.columns and 'Giá Trị Còn Lại' in df_global.columns:
+            cn_col_pdf = next((c for c in df_global.columns if 'chi nhánh' in c.lower() or 'chinhanh' in c.lower() or 'tên npp' in c.lower() or 'ten npp' in c.lower()), None)
+            
+            if cn_col_pdf:
+                df_cn_chua_nn = df_global[df_global['Lý Do'] == 'Chưa có nguyên nhân'].copy()
+                if not df_cn_chua_nn.empty:
+                    df_cn_chua_nn['NPP_XuLy'] = df_cn_chua_nn[cn_col_pdf].astype(str).str.strip().str.replace(
+                        "Công ty cổ phần Dược - Trang Thiết Bị Y Tế Bình Định", "Công ty", case=False, regex=False
+                    ).str.replace("Chi nhánh", "CN", case=False, regex=False).str.replace("Chi Nhánh", "CN", regex=False)
+                    
+                    df_npp_val = df_cn_chua_nn.groupby('NPP_XuLy')['Giá Trị Còn Lại'].sum().reset_index()
+                    df_npp_val['Doanh thu đọng (Trđ)'] = df_npp_val['Giá Trị Còn Lại'] / 1e6
+                    df_npp_don = df_cn_chua_nn[df_cn_chua_nn['Giá Trị Còn Lại'] > 0.01].groupby('NPP_XuLy').size().reset_index(name='Số đơn')
+                    df_pdf_npp = df_npp_val.merge(df_npp_don, on='NPP_XuLy', how='left').fillna(0)
+                    df_pdf_npp = df_pdf_npp.sort_values('Doanh thu đọng (Trđ)', ascending=False)
+
+                    if not df_pdf_npp.empty:
+                        h("ĐƠN CHƯA CÓ NGUYÊN NHÂN THEO CHI NHÁNH / NPP")
+                        rows_npp = [["Chi Nhánh / Nhà Phân Phối", "Chưa xuất (Tr.đồng)", "Số đơn đọng"]]
+                        for _, r in df_pdf_npp.iterrows():
+                            rows_npp.append([str(r["NPP_XuLy"]), f"{r['Doanh thu đọng (Trđ)']:,.2f}", str(int(r["Số đơn"]))])
+                        story.append(mktbl(rows_npp, [9*cm, 4.5*cm, 3.5*cm], "#34495e"))
+    except Exception:
+        pass # Phòng vệ lỗi hệ thống, nếu lỗi data vẫn xuất PDF các phần khác bình thường
+
+    # =========================================================================
+
     if not df_asm.empty:
         h("TOP 10 ASM CÓ DOANH SỐ CHƯA XUẤT CAO NHẤT")
         rows = [["Tên ASM","Chưa xuất (Tr.đồng)"]]
@@ -168,8 +203,6 @@ def _build_pdf(file_name, total_val, delivered_val, remain_val, rate_v,
     doc.build(story)
     buf.seek(0)
     return buf.read()
-
-
 # =============================================================================
 # TIÊU ĐỀ + NÚT PDF ĐẦU TRANG
 # Dùng st.rerun(): lần 1 tính PDF → lưu session_state → rerun
@@ -301,6 +334,43 @@ def get_col_opts(df, col):
         return sorted(df[col].dropna().unique().tolist())
     return []
 
+
+st.markdown("#### 📆 Lọc theo ngày đơn hàng")
+col_date1, col_date2 = st.columns(2)
+
+# Xác định ngày Min, Max mặc định từ dữ liệu để làm mốc giới hạn cho lịch chọn
+if ngay_col and not df_raw[ngay_col].dropna().empty:
+    df_raw[ngay_col] = pd.to_datetime(df_raw[ngay_col], errors='coerce')
+    min_date_val = df_raw[ngay_col].min().date()
+    max_date_val = df_raw[ngay_col].max().date()
+else:
+    import datetime
+    min_date_val = datetime.date(2026, 1, 1)
+    max_date_val = datetime.date(2026, 12, 31)
+
+# Thêm min_value và max_value để khóa toàn bộ các ngày không có trong dữ liệu
+with col_date1:
+    tu_ngay = st.date_input(
+        "Từ Ngày", 
+        value=min_date_val, 
+        min_value=min_date_val, 
+        max_value=max_date_val, 
+        format="DD/MM/YYYY"
+    )
+with col_date2:
+    den_ngay = st.date_input(
+        "Đến Ngày", 
+        value=max_date_val, 
+        min_value=min_date_val, 
+        max_value=max_date_val, 
+        format="DD/MM/YYYY"
+    )
+
+# Ép kiểu dữ liệu ngày bán hàng về datetime.date để so sánh chuẩn xác
+if ngay_col:
+    df_raw['Date_Only'] = pd.to_datetime(df_raw[ngay_col], errors='coerce').dt.date
+    # Lọc dữ liệu theo khoảng ngày đã chọn
+    df_raw = df_raw[(df_raw['Date_Only'] >= tu_ngay) & (df_raw['Date_Only'] <= den_ngay)]
 # --- BƯỚC 1: Chọn Kênh ---
 with f1:
     s_kenh = st.selectbox("🟠 Kênh", ["Tất cả"] + get_col_opts(df_raw, 'Kênh'))
@@ -426,7 +496,7 @@ with c2:
     st.plotly_chart(fig_o, use_container_width=True)
 
 # -----------------------------------------------------------------------------
-# 5. NGUYÊN NHÂN & TOP ASM
+# 5. NGUYÊN NHÂN & THEO CN
 # -----------------------------------------------------------------------------
 st.markdown("---")
 c3, c4 = st.columns(2)
@@ -472,6 +542,119 @@ with c3:
         st.warning("Thiếu dữ liệu cột Giá Trị Còn Lại")
 
 with c4:
+    st.subheader("🏢 Đơn CHƯA CÓ NGUYÊN NHÂN theo Chi Nhánh")
+    
+    # Xác định chính xác tên cột Tên NPP trong dữ liệu
+    npp_col = next((c for c in df_f.columns if 'tên npp' in c.lower() or 'ten npp' in c.lower()), None)
+    
+    if npp_col and 'Giá Trị Còn Lại' in df_f.columns and 'Lý Do' in df_f.columns:
+        # Lọc dữ liệu: Chỉ lấy các đơn đọng có lý do là "Chưa có nguyên nhân"
+        df_chua_nguyen_nhan = df_f[df_f['Lý Do'] == 'Chưa có nguyên nhân'].copy()
+        
+        if not df_chua_nguyen_nhan.empty:
+            # Bước xử lý chuỗi: Rút gọn tên NPP theo yêu cầu để biểu đồ hiển thị đẹp hơn
+            df_chua_nguyen_nhan['NPP_XuLy'] = df_chua_nguyen_nhan[npp_col].astype(str).str.strip()
+            
+            # Thay thế cụm từ Công ty cổ phần Dược... thành "Công ty"
+            df_chua_nguyen_nhan['NPP_XuLy'] = df_chua_nguyen_nhan['NPP_XuLy'].str.replace(
+                "Công ty cổ phần Dược - Trang Thiết Bị Y Tế Bình Định", "Công ty", case=False, regex=False
+            )
+            # Thay thế toàn bộ chữ "Chi nhánh" hoặc "Chi Nhánh" thành "CN"
+            df_chua_nguyen_nhan['NPP_XuLy'] = df_chua_nguyen_nhan['NPP_XuLy'].str.replace(
+                "Chi nhánh", "CN", case=False, regex=False
+            ).str.replace(
+                "Chi Nhánh", "CN", regex=False
+            )
+
+            # Tính toán doanh số đọng (Trđ) theo NPP đã xử lý tên
+            df_npp_val = df_chua_nguyen_nhan.groupby('NPP_XuLy')['Giá Trị Còn Lại'].sum().reset_index()
+            df_npp_val['Doanh thu đọng (Trđ)'] = df_npp_val['Giá Trị Còn Lại'] / to_million
+            
+            # Đếm số lượng đơn hàng đọng (> 0.01) theo NPP đã xử lý tên
+            df_npp_don = df_chua_nguyen_nhan[df_chua_nguyen_nhan['Giá Trị Còn Lại'] > 0.01].groupby('NPP_XuLy').size().reset_index(name='Số đơn')
+            
+            # Gộp dữ liệu doanh thu và số đơn
+            df_npp_report = df_npp_val.merge(df_npp_don, on='NPP_XuLy', how='left').fillna(0)
+            df_npp_report['Số đơn'] = df_npp_report['Số đơn'].astype(int)
+            df_npp_report = df_npp_report.sort_values('Doanh thu đọng (Trđ)', ascending=True)
+
+            # Tạo nhãn text hiển thị trực tiếp trên thanh biểu đồ
+            df_npp_report['label'] = df_npp_report.apply(
+                lambda r: f"{r['Doanh thu đọng (Trđ)']:,.2f} Trđ  |  {r['Số đơn']:,} đơn", axis=1
+            )
+
+            # Vẽ biểu đồ cột ngang
+            fig_npp = px.bar(
+                df_npp_report, 
+                x='Doanh thu đọng (Trđ)', 
+                y='NPP_XuLy', 
+                orientation='h', 
+                text='label',
+                color='Doanh thu đọng (Trđ)', 
+                color_continuous_scale='Blues', 
+                labels={'Doanh thu đọng (Trđ)': 'Giá trị chưa xuất (Trđ)', 'NPP_XuLy': 'Tên Nhà Phân Phối'}
+            )
+            
+# Thay thế toàn bộ cụm fig_npp.update_traces cũ tại ô c4 bằng đoạn này:
+            fig_npp.update_traces(
+                textposition=[
+                    'inside' if v >= 3000 else 'outside' 
+                    for v in df_npp_report['Doanh thu đọng (Trđ)']
+                ],
+                insidetextanchor='end',
+                insidetextfont=dict(size=12, color='white'),  # Chữ trắng khi nằm TRONG cột lớn
+                outsidetextfont=dict(size=12, color='black')  # Chữ ĐEN khi nằm NGOÀI cột nhỏ
+            )
+            
+# Lấy giá trị lớn nhất hiện tại để tính toán nới rộng trục X thêm 25%
+            max_val_x = df_npp_report['Doanh thu đọng (Trđ)'].max() if not df_npp_report.empty else 100
+
+            # Thay thế toàn bộ cụm fig_npp.update_layout cũ tại ô c4 bằng đoạn này:
+            fig_npp.update_layout(
+                height=420,
+                coloraxis_showscale=False,
+                margin=dict(t=10, b=10, l=10, r=10),
+                uniformtext_minsize=11,
+                uniformtext_mode='show',
+                xaxis=dict(range=[0, max_val_x * 1.25])  # Ép trục X rộng thêm 25% tạo khoảng trống cho chữ
+            )
+            st.plotly_chart(fig_npp, use_container_width=True)
+        else:
+            st.success("🎉 Tuyệt vời! Hiện tại không có NPP nào có đơn hàng đọng thuộc nhóm 'Chưa có nguyên nhân'.")
+    else:
+        st.warning("⚠️ Không tìm thấy cột 'Tên NPP', 'Lý Do' hoặc 'Giá Trị Còn Lại' trong file dữ liệu Excel.")
+# -----------------------------------------------------------------------------
+# 6. TOP 10 SẢN PHẨM
+# -----------------------------------------------------------------------------
+st.markdown("---")
+c5, c6 = st.columns(2)
+
+# --- CỘT TRÁI: Top 10 Sản phẩm ---
+with c5:
+    st.subheader("📊 Top 10 sản phẩm có doanh số chưa xuất cao nhất")
+    if 'Tên Sản Phẩm' in df_f.columns and 'Giá Trị Còn Lại' in df_f.columns:
+        df_p = df_f.groupby('Tên Sản Phẩm')['Giá Trị Còn Lại'].sum().reset_index()
+        df_p['Trđ'] = df_p['Giá Trị Còn Lại'] / to_million
+        df_p = df_p.sort_values('Trđ', ascending=False).head(10)
+        fig_p = px.bar(df_p, x='Tên Sản Phẩm', y='Trđ', color='Trđ', color_continuous_scale='YlOrRd',
+                       labels={'Trđ': 'Chưa xuất (Trđ)'}, text='Trđ')
+        fig_p.update_traces(
+            texttemplate='<b>%{text:,.2f}</b>',
+            textposition='outside',
+            textfont=dict(size=12, color='black')
+        )
+        fig_p.update_xaxes(tickfont=dict(size=11, color='black'), tickangle=-30)
+        fig_p.update_layout(
+            height=460,
+            coloraxis_showscale=False,
+            margin=dict(t=40, b=10, l=10, r=10),
+            uniformtext_minsize=10,
+            uniformtext_mode='show'
+        )
+        st.plotly_chart(fig_p, use_container_width=True)
+
+# --- CỘT PHẢI: Top 10 ASM ---
+with c6:
     st.subheader("📊 Top 10 ASM có doanh số chưa xuất cao nhất")
     if 'Tên ASM' in df_f.columns and 'Giá Trị Còn Lại' in df_f.columns:
         df_asm = df_f.groupby('Tên ASM')['Giá Trị Còn Lại'].sum().reset_index()
@@ -493,33 +676,6 @@ with c4:
             uniformtext_mode='show'
         )
         st.plotly_chart(fig_asm, use_container_width=True)
-
-# -----------------------------------------------------------------------------
-# 6. TOP 10 SẢN PHẨM
-# -----------------------------------------------------------------------------
-st.markdown("---")
-st.subheader("📊 Top 10 sản phẩm có doanh số chưa xuất cao nhất")
-if 'Tên Sản Phẩm' in df_f.columns and 'Giá Trị Còn Lại' in df_f.columns:
-    df_p = df_f.groupby('Tên Sản Phẩm')['Giá Trị Còn Lại'].sum().reset_index()
-    df_p['Trđ'] = df_p['Giá Trị Còn Lại'] / to_million
-    df_p = df_p.sort_values('Trđ', ascending=False).head(10)
-    fig_p = px.bar(df_p, x='Tên Sản Phẩm', y='Trđ', color='Trđ', color_continuous_scale='YlOrRd',
-                   labels={'Trđ': 'Chưa xuất (Trđ)'}, text='Trđ')
-    fig_p.update_traces(
-        texttemplate='<b>%{text:,.2f}</b>',
-        textposition='outside',
-        textfont=dict(size=12, color='black')
-    )
-    fig_p.update_xaxes(tickfont=dict(size=11, color='black'), tickangle=-30)
-    fig_p.update_layout(
-        height=460,
-        coloraxis_showscale=False,
-        margin=dict(t=40, b=10, l=10, r=10),
-        uniformtext_minsize=10,
-        uniformtext_mode='show'
-    )
-    st.plotly_chart(fig_p, use_container_width=True)
-
 # -----------------------------------------------------------------------------
 # 7. BẢNG TOP 5 ASM x TOP 3 SẢN PHẨM
 # -----------------------------------------------------------------------------
